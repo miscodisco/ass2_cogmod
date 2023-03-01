@@ -1,0 +1,222 @@
+---
+title: "Sim_data"
+output: html_document
+date: "2023-02-23"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+# load packages
+pacman::p_load(tidyverse)
+```
+
+```{r}
+# setup 
+trials <- 120
+num_agents <- 100
+rate <- 0.65
+noise <- 0.2
+```
+
+```{r}
+# random agent with noise
+RandomAgentNoise_f <- function(rate, noise) {
+  choice <- rbinom(1, 1, rate)
+  if (rbinom(1, 1, noise) == 1) 
+  {choice = rbinom(1, 1, 0.5)}
+  return(choice)
+  }
+```
+
+```{r}
+# LSWS - with noise 
+LSWSAgentNoise_f <- function(prevChoice, Feedback, noise){ 
+  if (Feedback == 1){
+    choice = 1-prevChoice} 
+  else if (Feedback == 0) {
+    choice = prevChoice 
+    }
+  if (rbinom(1,1,noise)==1){
+    choice <- rbinom(1,1,.5)
+    }
+  return(choice) 
+  }
+```
+
+
+```{r}
+# LSWS - 2 time lose shift 
+LSWSAgent2Lose_f <- function(prevChoice, Feedback, Feedback_oneback, noise){ 
+  # if you lose twice, shift instead of stay
+  if (Feedback_oneback == 0 & Feedback == 0){
+    choice = 1-prevChoice
+  }
+  # if you win, shift
+  else if (Feedback == 1){
+    choice = 1-prevChoice}
+  # if you lose, stay 
+  else if (Feedback_oneback == 1 & Feedback == 0) {
+    choice = prevChoice 
+  }
+  # sometimes be random 
+  if (rbinom(1,1,noise)==1){
+    choice <- rbinom(1,1,.65)
+    }
+  return(choice) 
+  }
+```
+
+
+
+```{r}
+# playing the game
+Self <- rep(NA, trials) 
+Other <- rep(NA, trials) 
+Feedback <- rep(NA, trials)
+Self[1] <- rbinom(1, 1, 0.5)
+Other[1] <- rbinom(1, 1, 0.5)
+Feedback[1] <- as.numeric(Self[1] == Other[1])
+for (i in 2:trials){ 
+  if (Self[i-1] == Other[i-1]){ 
+    Feedback[i] = 1 } 
+  else {
+    Feedback[i] = 0 } 
+  Self[i] <- LSWSAgent2Lose_f(Self[i-1], Feedback[i], Feedback[i-1], noise ) 
+  Other[i] <- RandomAgentNoise_f(rate = rate, noise = noise) 
+  }
+```
+
+
+```{r}
+df <- tibble(Self, Other, trial = seq(trials), Feedback = as.numeric(Self==Other)) 
+ggplot(df) + 
+  theme_classic() + 
+  geom_line(aes(trial, Self), color = "red") + 
+  geom_line(aes(trial, Other), color = "blue")
+ggplot(df)+
+  geom_bar(aes(as.factor(Feedback), fill = as.factor(Feedback)))+
+  theme_minimal()
+```
+
+```{r}
+# 100 agents 
+LSWS_random <- function(num_agents, trials, noise, rate){
+  for (agent in 1:num_agents){
+    Self <- rep(NA, trials) 
+    Other <- rep(NA, trials) 
+    Feedback <- rep(NA, trials)
+    Self[1] <- rbinom(1, 1, 0.5)
+    Other[1] <- rbinom(1, 1, 0.5)
+    Feedback[1] <- as.numeric(Self[1] == Other[1])
+    
+    for (i in 2:trials){ 
+      if (Self[i-1] == Other[i-1]){ 
+        Feedback[i] = 1 } 
+      else {
+        Feedback[i] = 0 } 
+      Self[i] <- LSWSAgentNoise_f(Self[i-1], Feedback[i],noise ) 
+      Other[i] <- RandomAgentNoise_f(rate = rate, noise = noise) 
+    }
+    
+    if (agent == 1){
+      df <- tibble(agent_nr = 1, rate, noise, Self, Other, trial = seq(trials))
+    }
+    else{
+      temp <- tibble(agent_nr = agent, rate, noise, Self, Other, trial = seq(trials))
+      df <- rbind(df,temp)
+    }
+  }
+  return (df)
+}
+LSWS2_random <- function(num_agents, trials, noise, rate){
+  for (agent in 1:num_agents){
+    Self <- rep(NA, trials) 
+    Other <- rep(NA, trials) 
+    Feedback <- rep(NA, trials)
+    Self[1] <- rbinom(1, 1, 0.5)
+    Other[1] <- rbinom(1, 1, 0.5)
+    Feedback[1] <- as.numeric(Self[1] == Other[1])
+    
+    for (i in 2:trials){ 
+      if (Self[i-1] == Other[i-1]){ 
+        Feedback[i] = 1 } 
+      else {
+        Feedback[i] = 0 } 
+      Self[i] <- LSWSAgent2Lose_f(Self[i-1], Feedback[i], Feedback[i-1], noise ) 
+      Other[i] <- RandomAgentNoise_f(rate = rate, noise = noise) 
+    }
+    
+    if (agent == 1){
+      df <- tibble(agent_nr = 1, rate, noise, Self, Other, trial = seq(trials))
+    }
+    else{
+      temp <- tibble(agent_nr = agent, rate, noise, Self, Other, trial = seq(trials))
+      df <- rbind(df,temp)
+    }
+  }
+  return (df)
+}
+```
+
+
+```{r}
+test <- LSWS_random(num_agents, trials, noise, rate)
+test$strategy <- 'LSWS'
+test2 <- LSWS2_random(num_agents, trials, noise, rate)
+test2$strategy <- 'LSWS2'
+df <- rbind(test, test2)
+```
+
+
+
+```{r}
+# plotting 
+df2 <- df %>% 
+  group_by(strategy, agent_nr) %>% mutate(cumulativerate = cumsum(Self) / seq_along(Self))
+ggplot(df2, aes(trial, cumulativerate)) + 
+  geom_line(aes(col = agent_nr)) + 
+  geom_hline(yintercept = 0.5, linetype="dashed") + 
+  ylim(0,1) + 
+  facet_wrap(.~strategy) + 
+  theme_classic()+
+  ylab('Cumulative choice rate')
+ggplot(df2, aes(trial, cumulativerate)) + 
+  geom_smooth() + 
+  geom_hline(yintercept = 0.5, linetype="dashed") + 
+  ylim(0,1) + 
+  facet_wrap(.~strategy) + 
+  theme_bw()+
+  ylab('Cumulative choice rate')
+df3 <- df %>% 
+  group_by(strategy,agent_nr) %>% 
+  mutate(Feedback = as.numeric(Self == Other),
+         cumulativerateSelf = cumsum(Feedback) / seq_along(Feedback), 
+         cumulativerateOther = cumsum(1-Feedback) / seq_along(Feedback) 
+         )
+ggplot(df3) + 
+  theme_classic() + 
+  geom_line(aes(trial, cumulativerateSelf, col = agent_nr)) + 
+  #geom_line(color="blue", aes(trial, cumulativerateOther))+
+  geom_hline(yintercept = .5, linetype = 'dashed', color = 'black')+
+  facet_wrap(~strategy)+
+  ylab('Cumulative win percentage')
+ggplot(df3) + 
+  theme_bw() + 
+  geom_smooth(aes(trial, cumulativerateSelf)) + 
+  #geom_line(color="blue", aes(trial, cumulativerateOther))+
+  geom_hline(yintercept = .5, linetype = 'dashed', color = 'black')+
+  facet_wrap(~strategy)+
+  ylab('Cumulative win percentage')
+```
+
+```{r}
+# Pull out choice and recov
+choice <- df$Self
+rate <- df$rate
+
+```
+
