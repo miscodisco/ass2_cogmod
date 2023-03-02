@@ -1,0 +1,110 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r} 
+# Loading dependencies
+pacman::p_load(tidyverse, here, posterior, cmdstanr, brms, tidybayes)
+
+
+RandomAgentNoise_f <- function(rate, noise) {
+
+  choice <- rbinom(1, 1, rate) # generating noiseless choices
+  
+  if (rbinom(1, 1, noise) == 1) {
+    choice = rbinom(1, 1, 0.5) # introducing noise
+  }
+  
+  return(choice)
+}
+```
+
+```{r}
+# Simulating data with different noise-levels and different rates
+trials <- 120
+d <- NULL
+
+for (noise in seq(0, 0.5, 0.1)) { # looping through noise levels
+
+  for (rate in seq(0, 1, 0.1)) { # looping through rate levels
+    randomChoice <- rep(NA, trials)
+    
+    for (t in seq(trials)) { # looping through trials (to make it homologous to more reactive models)
+      randomChoice[t] <- RandomAgentNoise_f(rate, noise)
+    }
+    temp <- tibble(trial = seq(trials), choice = randomChoice, rate, noise)
+    temp$cumulativerate <- cumsum(temp$choice) / seq_along(temp$choice)
+
+    if (exists("d")) {
+      d <- rbind(d, temp)
+    } else{
+      d <- temp
+    }
+  }
+}
+```
+
+
+```{r}
+# Running stan on a subset of the data
+d1 <- d %>% subset(noise == 0 & rate == 0.8)
+
+## Create the data. N.B. note the two variables have different lengths: 1 for n, n for h.
+data <- list(
+  n = 120,  # n of trials
+  h = d1$choice # sequence of choices (h stands for hand)
+)
+
+```
+
+```{r}
+## Specify where the model is
+file <- file.path("random_agent_parameter_fit.stan")
+mod <- cmdstan_model(file, 
+                     # this specifies we can parallelize the gradient estimations on multiple cores
+                     cpp_options = list(stan_threads = TRUE), 
+                     # this is a trick to make it faster
+                     stanc_options = list("O1"))
+```
+```{r}
+samples <- mod$sample(
+  data = data, # the data :-)
+  seed = 123,  # a seed, so I always get the same results
+  chains = 2,  # how many chains should I fit (to check whether they give the same results)
+  parallel_chains = 2, # how many of the chains can be run in parallel?
+  threads_per_chain = 2, # distribute gradient estimations within chain across multiple cores
+  iter_warmup = 1000,  # warmup iterations through which hyperparameters (steps and step length) are adjusted
+  iter_sampling = 2000, # total number of iterations
+  refresh = 0,  # how often to show that iterations have been run
+  max_treedepth = 20, # how many steps in the future to check to avoid u-turns
+  adapt_delta = 0.99, # how high a learning rate to adjust hyperparameters during warmup
+)
+```
+
+
+```{r}
+samples$summary()
+```
+```{r}
+# Plot theta for the rate
+
+draws_df <- as_draws_df(samples$draws())
+
+# Checking the model's chains
+ggplot(draws_df, aes(.iteration, theta, group = .chain, color = .chain)) +
+  geom_line() +
+  theme_classic()
+
+```
+```{r}
+
+
+
+```
+
+
+
+
+
