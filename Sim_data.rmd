@@ -220,3 +220,61 @@ rate <- df$rate
 
 ```
 
+
+# New LSWS
+```{r}
+# LSWS - with noise and loss aversion 
+LSWSAgentNoise_f <- function(prevChoice, Feedback, noise, shift_bias){ 
+  # if the agent won on previous round - shift 
+  if (Feedback == 1){
+    choice = 1-prevChoice} 
+  # if the agent lost - stay most of the time 
+  else if (Feedback == 0) {
+    if (rbinom(1,1,shift_bias)==0){
+      choice = prevChoice 
+    }
+    else {
+      choice = 1-prevChoice
+    }
+  }
+  # be random sometimes 
+  if (rbinom(1,1,noise)==1){
+    choice <- rbinom(1,1,.5)
+    }
+  return(choice) 
+  }
+```
+
+```{r}
+# LSWS - 2 time lose shift with noise and loss aversion
+LSWSAgent2Lose_f <- function(prevChoice, Feedback, Feedback_oneback, noise, shift_bias){ 
+  # if you win, shift
+  if (Feedback == 1){
+    choice = 1-prevChoice
+    }
+  # if you lose twice, increase shift bias 
+  else if (Feedback_oneback == 0 & Feedback == 0){
+    if (rbinom(1,1,2*shift_bias)==0){
+      choice = prevChoice 
+    }
+    else {
+      choice = 1-prevChoice
+    }
+  }
+  # if you lose, stay most of the time with some shift bias 
+  else if (Feedback_oneback == 1 & Feedback == 0) {
+    if (rbinom(1,1,shift_bias)==0){
+      choice = prevChoice 
+    }
+    else {
+      choice = 1-prevChoice
+    }
+  }
+  # sometimes be random 
+  if (rbinom(1,1,noise)==1){
+    choice <- rbinom(1,1,.5)
+    }
+  return(choice) 
+}
+```
+
