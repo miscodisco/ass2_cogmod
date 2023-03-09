@@ -117,6 +117,8 @@ draws_df <- as_draws_df(samples$draws())
 # plot parameters
 mcmc_hist(samples$draws("follow_bias"))  # follow bias
 mcmc_hist(samples$draws("bias"))  # bias
+mcmc_hist(samples$draws("follow_bias_prior"))  # follow bias
+mcmc_hist(samples$draws("bias_prior"))  # bias
 
 ```
 
@@ -129,13 +131,12 @@ ggplot(draws_df, aes(.iteration, follow_bias, group = .chain, color = .chain)) +
 # Plotting the estimates against the prior distribution
 # the dashed line is the true rate
 
-# add a prior for theta (ugly, but we'll do better soon)
+# add a prior for follow bias
 draws_df <- draws_df %>% 
   mutate(fb_prior = rnorm(nrow(draws_df), 0, 1)
 )
 
-# Now let's plot the density for theta (prior and posterior)
-
+# Now let's plot the density for follow bias (prior and posterior)
 ggplot(draws_df) +
   geom_density(aes(follow_bias), fill = "blue", alpha = 0.3) +
   geom_density(aes(fb_prior), fill = "red", alpha = 0.3) +
@@ -146,13 +147,12 @@ ggplot(draws_df) +
 ```
 
 ```{r}
-# add a prior for theta (ugly, but we'll do better soon)
+# add a prior for bias 
 draws_df <- draws_df %>% 
   mutate(b_prior = rnorm(nrow(draws_df), 0, 1)
 )
 
-# Now let's plot the density for theta (prior and posterior)
-
+# Now let's plot the density for bias (prior and posterior)
 ggplot(draws_df) +
   geom_density(aes(bias), fill = "blue", alpha = 0.3) +
   geom_density(aes(b_prior), fill = "red", alpha = 0.3) +
