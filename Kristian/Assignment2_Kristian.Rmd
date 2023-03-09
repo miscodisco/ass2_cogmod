@@ -1,0 +1,164 @@
+---
+title: "Assignment2_Kristian"
+output: html_document
+date: "2023-03-09"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+# packages
+pacman::p_load(tidyverse,
+        here,
+        posterior,
+        cmdstanr,
+        brms, 
+        tidybayes,
+        bayesplot)
+
+# load function from source
+source("RandomAgentNoise_f.R")
+source("LSWSAgentNoise_f.R")
+source("LSWSAgentBias_f.R")
+
+```
+
+
+## Matching pennies with LSWS 
+
+
+### Simulating data
+```{r}
+# set up
+ntrials <- 120
+nagents <- 10
+bias <- 0.6
+follow_bias <- 0.8
+rate <- 0.5
+noise <- 0.2
+
+df <- NULL
+sim <- function(nagents, ntrials, bias, follow_bias, rate, noise){
+
+  for (agent in 1:nagents){
+    self <- rep(NA, ntrials) 
+    other <- rep(NA, ntrials) 
+    feedback <- rep(NA, ntrials)
+    self[1] <- rbinom(1, 1, 0.5)
+    other[1] <- rbinom(1, 1, 0.5)
+    # HERE Riccardo REMOVED THE FEEDBACK LINE
+    
+    for (i in 2:ntrials){ # HERE Riccardo GENERATES FEEDBACK BASED ON THE PREVIOUS TRIAL TO INFORM THE CURRENT TRIAL
+      if (self[i-1] == other[i-1]){ 
+          feedback[i-1] = 1 } 
+        else {
+          feedback[i-1] = 0 } 
+        self[i] <- LSWSAgentBias_f(self[i-1], feedback[i-1], bias, follow_bias) # HERE Riccardo USEs PREVIOUS CHOICE AND PREV FEEDBACK TO GENERATE CURRENT CHOICE
+        other[i] <- RandomAgentNoise_f(rate = 0.5, noise = 0.1) 
+    }   
+    feedback[ntrials] <- ifelse(self[ntrials] == other[ntrials], 1, 0) # HERE Riccardo GENERATES FEEDBACK FOR THE LAST TRIAL, TO AVOID LOSING THAT ROW LATER
+    temp <- tibble(agent_nr = agent, bias, follow_bias, self, other, feedback, trial = seq(ntrials)) # HERE Riccardo SAVES ALSO OTHER; TO BETTER UNDERSTAND WHAT THE AGENT IS DOING
+
+    if (exists("df")) { df <- rbind(df, temp)} else{df <- temp} 
+    
+  }
+  return (df)
+}
+
+sim_df <- sim(nagents, ntrials, bias, follow_bias, rate, noise)
+
+# HERE Riccardo LAGS THE OUTCOME_HAND: I WANT THE VARIABLE INFORMED BY PREVIOUS CHOICE AND FEEDBACK TO APPEAR IN THE CURRENT TRIAL
+sim_df$outcome_hand <- ifelse(lag(sim_df$feedback == 1 & sim_df$self == 0,1) | 
+                              lag(sim_df$feedback == 0 & sim_df$self == 1,1) , 
+                              1, -1)
+
+# Riccardo's PROCEDURE GENERATED SOME NAs (no outcome hand for the first trial in each agent), HE REMOVES THOSE ROWS 
+sim_df <- sim_df[complete.cases(sim_df),]
+```
+
+### let's do some stan
+
+```{r}
+#sim_df <- sim_df %>% 
+  #subset(agent_nr == 1)
+
+data <- list(n = 1199, c = sim_df$self, outcome_hand = sim_df$outcome_hand) # to implement Riccardo's sim, n needs to be 1199
+
+file <- file.path("LSWS.stan")
+mod <- cmdstan_model(file, 
+                     cpp_options = list(stan_threads = TRUE),
+                     stanc_options = list("O1"))
+
+# The following command calls Stan with specific options.
+samples <- mod$sample(
+  data = data,
+  seed = 123,
+  chains = 2,
+  parallel_chains = 2,
+  threads_per_chain = 2,
+  iter_warmup = 1000,
+  iter_sampling = 2000,
+  refresh = 0,
+  max_treedepth = 20,
+  adapt_delta = 0.99,
+)
+```
+
+```{r}
+# get summary
+samples$summary()
+
+# Convert to data frame using posterior::as_draws_df
+draws_df <- as_draws_df(samples$draws())
+
+# plot parameters
+mcmc_hist(samples$draws("follow_bias"))  # follow bias
+mcmc_hist(samples$draws("bias"))  # bias
+
+```
+
+```{r}
+# Checking the model's chains
+ggplot(draws_df, aes(.iteration, follow_bias, group = .chain, color = .chain)) +
+  geom_line() +
+  theme_classic()
+
+# Plotting the estimates against the prior distribution
+# the dashed line is the true rate
+
+# add a prior for theta (ugly, but we'll do better soon)
+draws_df <- draws_df %>% 
+  mutate(fb_prior = rnorm(nrow(draws_df), 0, 1)
+)
+
+# Now let's plot the density for theta (prior and posterior)
+
+ggplot(draws_df) +
+  geom_density(aes(follow_bias), fill = "blue", alpha = 0.3) +
+  geom_density(aes(fb_prior), fill = "red", alpha = 0.3) +
+  geom_vline(xintercept = 0.8, linetype = "dashed", color = "black", linewidth = 1.5) +
+  xlab("Follow Bias") +
+  ylab("Posterior Density") +
+  theme_classic()
+```
+
+```{r}
+# add a prior for theta (ugly, but we'll do better soon)
+draws_df <- draws_df %>% 
+  mutate(b_prior = rnorm(nrow(draws_df), 0, 1)
+)
+
+# Now let's plot the density for theta (prior and posterior)
+
+ggplot(draws_df) +
+  geom_density(aes(bias), fill = "blue", alpha = 0.3) +
+  geom_density(aes(b_prior), fill = "red", alpha = 0.3) +
+  geom_vline(xintercept = 0.6, linetype = "dashed", color = "black", linewidth = 1.5) +
+  xlab("Bias") +
+  ylab("Posterior Density") +
+  theme_classic()
+```
+
