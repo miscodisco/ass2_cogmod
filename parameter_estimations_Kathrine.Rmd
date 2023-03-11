@@ -1,0 +1,394 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r} 
+# Loading dependencies
+pacman::p_load(tidyverse, here, posterior, cmdstanr, brms, tidybayes)
+
+
+RandomAgentNoise_f <- function(rate, noise) {
+
+  choice <- rbinom(1, 1, rate) # generating noiseless choices
+  
+  if (rbinom(1, 1, noise) == 1) {
+    choice = rbinom(1, 1, 0.5) # introducing noise
+  }
+  
+  return(choice)
+}
+```
+
+```{r}
+# Simulating data with different noise-levels and different rates
+trials <- 120
+d <- NULL
+
+for (noise in seq(0, 0.5, 0.1)) { # looping through noise levels
+
+  for (rate in seq(0, 1, 0.1)) { # looping through rate levels
+    randomChoice <- rep(NA, trials)
+    
+    for (t in seq(trials)) { # looping through trials (to make it homologous to more reactive models)
+      randomChoice[t] <- RandomAgentNoise_f(rate, noise)
+    }
+    temp <- tibble(trial = seq(trials), choice = randomChoice, rate, noise)
+    temp$cumulativerate <- cumsum(temp$choice) / seq_along(temp$choice)
+
+    if (exists("d")) {
+      d <- rbind(d, temp)
+    } else{
+      d <- temp
+    }
+  }
+}
+```
+
+
+```{r}
+# Running stan on a subset of the data
+d1 <- d %>% subset(noise == 0 & rate == 0.8)
+
+## Create the data. N.B. note the two variables have different lengths: 1 for n, n for h.
+data <- list(
+  n = 120,  # n of trials
+  h = d1$choice # sequence of choices (h stands for hand)
+)
+
+```
+
+```{r}
+## Specify where the model is
+file <- file.path("random_agent_parameter_fit.stan")
+mod <- cmdstan_model(file, 
+                     # this specifies we can parallelize the gradient estimations on multiple cores
+                     cpp_options = list(stan_threads = TRUE), 
+                     # this is a trick to make it faster
+                     stanc_options = list("O1"))
+```
+```{r}
+samples <- mod$sample(
+  data = data, # the data :-)
+  seed = 123,  # a seed, so I always get the same results
+  chains = 2,  # how many chains should I fit (to check whether they give the same results)
+  parallel_chains = 2, # how many of the chains can be run in parallel?
+  threads_per_chain = 2, # distribute gradient estimations within chain across multiple cores
+  iter_warmup = 1000,  # warmup iterations through which hyperparameters (steps and step length) are adjusted
+  iter_sampling = 2000, # total number of iterations
+  refresh = 0,  # how often to show that iterations have been run
+  max_treedepth = 20, # how many steps in the future to check to avoid u-turns
+  adapt_delta = 0.99, # how high a learning rate to adjust hyperparameters during warmup
+)
+```
+
+
+```{r}
+samples$summary()
+```
+```{r}
+# Plot theta for the rate
+
+draws_df <- as_draws_df(samples$draws())
+
+# Checking the model's chains
+ggplot(draws_df, aes(.iteration, theta, group = .chain, color = .chain)) +
+  geom_line() +
+  theme_classic()
+
+```
+```{r}
+# Plotting the estimates against the prior distribution
+# the dashed line is the true rate
+
+# add a prior for theta (ugly, but we'll do better soon)
+draws_df <- draws_df %>% mutate(
+  theta_prior = rbeta(nrow(draws_df), 1, 1)
+)
+
+# Now let's plot the density for theta (prior and posterior)
+ggplot(draws_df) +
+  geom_density(aes(theta), fill = "blue", alpha = 0.3) +
+  geom_density(aes(theta_prior), fill = "red", alpha = 0.3) +
+  geom_vline(xintercept = 0.8, linetype = "dashed", color = "black", linewidth = 1.5) +
+  xlab("Rate") +
+  ylab("Posterior Density") +
+  theme_classic()
+
+```
+
+```{r}
+# Same model but defined with logodds prior
+file <- file.path("random_agent_parameter_fit_logodds.stan")
+mod <- cmdstan_model(file, 
+                     cpp_options = list(stan_threads = TRUE),
+                     stanc_options = list("O1"))
+
+# The following command calls Stan with specific options.
+samples <- mod$sample(
+  data = data,
+  seed = 123,
+  chains = 2,
+  parallel_chains = 2,
+  threads_per_chain = 2,
+  iter_warmup = 1000,
+  iter_sampling = 2000,
+  refresh = 0,
+  max_treedepth = 20,
+  adapt_delta = 0.99,
+)
+
+```
+
+```{r}
+samples
+```
+
+```{r}
+samples$cmdstan_diagnose()
+```
+```{r}
+draws_df <- as_draws_df(samples$draws()) 
+
+ggplot(draws_df, aes(.iteration, theta, group = .chain, color = .chain)) +
+  geom_line() +
+  theme_classic()
+```
+```{r}
+samples$summary()
+```
+
+# Parameter recovery for multiple rates and noise levels
+```{r}
+# Now we need to scale it up to all possible rates and noises
+recovery_df <- NULL
+
+for (noiseLvl in unique(d$noise)) {
+  
+  for (rateLvl in unique(d$rate)) {
+    
+    dd <- d %>% subset(
+      noise == noiseLvl  & rate == rateLvl
+    )
+    
+    data <- list(
+      n = 120,
+      h = dd$choice
+    )
+    
+    samples <- mod$sample(
+      data = data,
+      seed = 123,
+      chains = 1,
+      parallel_chains = 1,
+      threads_per_chain = 1,
+      iter_warmup = 1000,
+      iter_sampling = 2000,
+      refresh = 0,
+      max_treedepth = 20,
+      adapt_delta = 0.99,
+    )
+    
+    draws_df <- as_draws_df(samples$draws()) 
+    temp <- tibble(biasEst = inv_logit_scaled(draws_df$theta), 
+                   biasTrue = rateLvl, noise = noiseLvl)
+    
+    
+    if (exists("recovery_df")) {recovery_df <- rbind(recovery_df, temp)} else {recovery_df <- temp}
+    
+  }
+  
+}
+
+```
+
+```{r}
+# Note: Each black dot represents one sample in the Markov chain. That is - for each bias and noise rate we have 2000 data points
+
+ggplot(recovery_df, aes(biasTrue, biasEst)) +
+  geom_point(alpha = 0.1) +
+  geom_smooth() +
+  facet_wrap(.~noise) +
+  theme_classic()
+```
+
+# Make the job run on multiple cores
+
+```{r}
+pacman::p_load(future, purrr, furrr)
+plan(multisession, workers = 4)
+
+sim_d_and_fit <- function(seed, trials, rateLvl, noiseLvl) {
+  
+    for (t in seq(trials)) { # looping through trials (to make it homologous to more reactive models)
+      randomChoice[t] <- RandomAgentNoise_f(rateLvl, noiseLvl)
+    }
+    temp <- tibble(trial = seq(trials), choice = randomChoice, rate, noise)
+    
+    data <- list(
+      n = 120,
+      h = temp$choice
+    )
+    
+    samples <- mod$sample(
+      data = data,
+      seed = 1000,
+      chains = 1,
+      parallel_chains = 1,
+      threads_per_chain = 1,
+      iter_warmup = 1000,
+      iter_sampling = 2000,
+      refresh = 0,
+      max_treedepth = 20,
+      adapt_delta = 0.99,
+    )
+    
+    draws_df <- as_draws_df(samples$draws()) 
+    temp <- tibble(biasEst = inv_logit_scaled(draws_df$theta), 
+                   biasTrue = rateLvl, noise = noiseLvl)
+    
+    return(temp)
+  
+}
+
+
+temp <- tibble(unique(d[,c("rate", "noise")])) %>% 
+  mutate(seed = 1000, trials = 120) %>%
+  rename(rateLvl = rate, noiseLvl = noise)
+
+recovery_df <- future_pmap_dfr(temp, sim_d_and_fit, .options = furrr_options(seed = TRUE)) # This is what makes it run in parallel
+```
+```{r}
+ggplot(recovery_df, aes(biasTrue, biasEst)) +
+  geom_point(alpha = 0.1) +
+  geom_smooth() +
+  facet_wrap(.~noise) +
+  theme_classic()
+```
+
+# Memory model
+we incorporate memory by inferring theta from a linear model stating that (bias + b1 * PreviousRate).
+
+```{r}
+# We subset to only include no noise and a specific rate
+d1 <- d %>% 
+  subset(noise == 0 & rate == 0.8) %>% 
+  rename(Other = choice) %>% 
+  mutate(cumulativerate = lag(cumulativerate, 1))
+
+d1$cumulativerate[1] <- 0.5 # no prior info at first trial
+d1$cumulativerate[d1$cumulativerate == 0] <- 0.01
+d1$cumulativerate[d1$cumulativerate == 1] <- 0.99
+
+# Now we create the memory agent with a coefficient of 0.9
+MemoryAgent_f <- function(bias, beta, cumulativerate){
+    choice = rbinom(1, 1, inv_logit_scaled(bias + beta * cumulativerate))
+  return(choice)
+}
+
+d1$Self[1] <- RandomAgentNoise_f(0.5, 0)
+
+for (i in 2:trials) {
+  d1$Self[i] <- MemoryAgent_f(bias = 0, beta = 0.8, d1$cumulativerate[i])
+}
+
+
+
+## Create the data
+data <- list(
+  n = 120,
+  h = d1$Self,
+  memory = d1$cumulativerate # this creates the new parameter: the rate of right hands so far in log-odds
+)
+
+```
+
+
+```{r}
+# Running stan
+
+file <- file.path("memory_agent_parameter_fit.stan")
+mod <- cmdstan_model(file, cpp_options = list(stan_threads = TRUE),
+                     stanc_options = list("O1"))
+
+# The following command calls Stan with specific options.
+samples <- mod$sample(
+  data = data,
+  seed = 123,
+  chains = 1,
+  parallel_chains = 2,
+  threads_per_chain = 2,
+  iter_warmup = 1000,
+  iter_sampling = 1000,
+  refresh = 0,
+  max_treedepth = 20,
+  adapt_delta = 0.99,
+)
+
+#samples$summary() 
+```
+
+# Memory agent with internal parameter
+Opens up to possibilities to model how long memory is kept weighted by the distance from the current moment.
+
+```{r}
+## Create the data
+data <- list(
+  n = 120,
+  h = d1$Self,
+  other = d1$Other
+)
+
+
+file <- file.path("weighted_memory_agent.stan")
+mod <- cmdstan_model(file, cpp_options = list(stan_threads = TRUE),
+                     stanc_options = list("O1"))
+
+samples <- mod$sample(
+  data = data,
+  seed = 123,
+  chains = 1,
+  parallel_chains = 2,
+  threads_per_chain = 2,
+  iter_warmup = 1000,
+  iter_sampling = 1000,
+  refresh = 0,
+  max_treedepth = 20,
+  adapt_delta = 0.99,
+)
+```
+
+```{r}
+samples$summary()
+```
+
+# Memory model with rate of forgetting that exponentially discounts the past
+
+```{r}
+## Specify where the model is
+file <- file.path("exponential_forgetting_agent.stan")
+mod <- cmdstan_model(file, cpp_options = list(stan_threads = TRUE),
+                     stanc_options = list("O1"))
+
+samples <- mod$sample(
+  data = data,
+  seed = 123,
+  chains = 1,
+  parallel_chains = 2,
+  threads_per_chain = 2,
+  iter_warmup = 1000,
+  iter_sampling = 1000,
+  refresh = 0,
+  max_treedepth = 20,
+  adapt_delta = 0.99,
+)
+```
+
+```{r}
+samples$summary()
+```
+
+
+
+
