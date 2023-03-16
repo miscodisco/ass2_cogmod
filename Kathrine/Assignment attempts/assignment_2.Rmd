@@ -60,7 +60,7 @@ RandomAgentNoise_f <- function(rate, noise) {
 
 
 df <- NULL
-sim <- function(nagents, ntrials, bias, follow_bias, rate, noise){
+sim <- function(nagents, ntrials, bias, follow_bias){
 
   for (agent in 1:nagents){
     self <- rep(NA, ntrials) 
@@ -76,7 +76,7 @@ sim <- function(nagents, ntrials, bias, follow_bias, rate, noise){
         else {
           feedback[i-1] = 0 } 
         self[i] <- LSWSAgentBias_f(self[i-1], feedback[i-1], bias, follow_bias) # HERE I USE PREVIOUS CHOICE AND PREV FEEDBACK TO GENERATE CURRENT CHOICE
-        other[i] <- RandomAgentNoise_f(rate = 0.5, noise = 0.1) 
+        other[i] <- RandomAgentNoise_f(rate = rate, noise = noise) 
     }   
     feedback[ntrials] <- ifelse(self[ntrials] == other[ntrials], 1, 0) # HERE I GENERATE FEEDBACK FOR THE LAST TRIAL, TO AVOID LOSING THAT ROW LATER
     temp <- tibble(agent_nr = agent, bias, follow_bias, self, other, feedback, trial = seq(ntrials)) # HERE I SAVE ALSO OTHER; TO BETTER UNDERSTAND WHAT THE AGENT IS DOING
@@ -87,7 +87,7 @@ sim <- function(nagents, ntrials, bias, follow_bias, rate, noise){
   return (df)
 }
 
-sim_df <- sim(nagents, ntrials, bias, follow_bias, rate, noise)
+sim_df <- sim(nagents, ntrials, bias, follow_bias)
 
 # HERE I LAG THE OUTCOME_HAND: I WANT THE VARIABLE INFORMED BY PREVIOUS CHOICE AND FEEDBACK TO APPEAR IN THE CURRENT TRIAL
 sim_df$outcome_hand <- ifelse(lag(sim_df$feedback == 1 & sim_df$self == 0,1) | 
