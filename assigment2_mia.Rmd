@@ -31,8 +31,66 @@ bias <- 0.6
 follow_bias <- 0.8
 rate <- 0.5
 noise <- 0.2
+beta <- 0.5
+```
 
-# agent function
+
+```{r}
+RandomAgentNoise_f <- function(rate, noise) {
+  choice <- rbinom(1, 1, rate)
+  if (rbinom(1, 1, noise) == 1) 
+  {choice = rbinom(1, 1, 0.5)}
+  return(choice)
+  }
+```
+
+```{r}
+randomChoice <- array(NA, ntrials)
+
+for (t in seq(ntrials)) { 
+      randomChoice[t] <- RandomAgentNoise_f(rate, noise)
+    }
+d1 <- tibble(trial = seq(ntrials), Other = randomChoice, rate, noise)
+
+```
+
+
+```{r}
+# memory agent
+memory <- array(NA, ntrials)
+
+for (trial in 1:ntrials){
+  if (trial == 1) {
+    memory[trial] = 0.5;
+  } 
+  if (trial < ntrials){
+      memory[trial + 1] = memory[trial] + ((d1$Other[trial] - memory[trial]) / trial);
+      if (memory[trial + 1] == 0){memory[trial + 1] = 0.01;}
+      if (memory[trial + 1] == 1){memory[trial + 1] = 0.99;}
+    }
+}
+
+d1$memory <- memory
+
+# Now we create the memory agent 
+MemoryAgent_f <- function(bias, beta, memory){
+    choice = rbinom(1, 1, inv_logit_scaled(bias + beta * memory))
+  return(choice)
+}
+
+Self = array(NA, ntrials)
+Self[1] <- rbinom(1, 1, 0.5) # no prior info at first trial
+
+for (i in 2:ntrials) {
+  Self[i] <- MemoryAgent_f(bias = 0, beta = 0.8, d1$memory[i])
+}
+
+d1$Self = Self
+```
+
+
+```{r}
+# LSWS agent function
 LSWSAgentBias_f <- function(prevChoice, Feedback, bias, follow_bias){ 
   # if the agent won on previous round - shift 
   if (Feedback == 1 & prevChoice == 0){
@@ -50,15 +108,10 @@ LSWSAgentBias_f <- function(prevChoice, Feedback, bias, follow_bias){
   }
   return(choice) 
 }
-
-RandomAgentNoise_f <- function(rate, noise) {
-  choice <- rbinom(1, 1, rate)
-  if (rbinom(1, 1, noise) == 1) 
-  {choice = rbinom(1, 1, 0.5)}
-  return(choice)
-  }
+```
 
 
+```{r}
 df <- NULL
 sim <- function(nagents, ntrials, bias, follow_bias, rate, noise){
 
@@ -68,38 +121,43 @@ sim <- function(nagents, ntrials, bias, follow_bias, rate, noise){
     feedback <- rep(NA, ntrials)
     self[1] <- rbinom(1, 1, 0.5)
     other[1] <- rbinom(1, 1, 0.5)
-    feedback[1] <- as.numeric(self[1] == other[1])
+    # HERE Riccardo REMOVED THE FEEDBACK LINE
     
-    for (i in 2:ntrials){ 
+    for (i in 2:ntrials){ # HERE Riccardo GENERATES FEEDBACK BASED ON THE PREVIOUS TRIAL TO INFORM THE CURRENT TRIAL
       if (self[i-1] == other[i-1]){ 
-          feedback[i] = 1 } 
+          feedback[i-1] = 1 } 
         else {
-          feedback[i] = 0 } 
-        self[i] <- LSWSAgentBias_f(self[i-1], feedback[i], bias, follow_bias) 
+          feedback[i-1] = 0 } 
+        self[i] <- LSWSAgentBias_f(self[i-1], feedback[i-1], bias, follow_bias) # HERE Riccardo USEs PREVIOUS CHOICE AND PREV FEEDBACK TO GENERATE CURRENT CHOICE
         other[i] <- RandomAgentNoise_f(rate = 0.5, noise = 0.1) 
     }   
-    temp <- tibble(agent_nr = agent, bias, follow_bias, self, feedback, trial = seq(ntrials))
+    feedback[ntrials] <- ifelse(self[ntrials] == other[ntrials], 1, 0) # HERE Riccardo GENERATES FEEDBACK FOR THE LAST TRIAL, TO AVOID LOSING THAT ROW LATER
+    temp <- tibble(agent_nr = agent, bias, follow_bias, self, other, feedback, trial = seq(ntrials)) # HERE Riccardo SAVES ALSO OTHER; TO BETTER UNDERSTAND WHAT THE AGENT IS DOING
 
     if (exists("df")) { df <- rbind(df, temp)} else{df <- temp} 
     
   }
   return (df)
 }
-
 sim_df <- sim(nagents, ntrials, bias, follow_bias, rate, noise)
 
-sim_df$outcome_hand <- ifelse(sim_df$feedback == 1 & sim_df$self == 0 | 
-                              sim_df$feedback == 0 & sim_df$self == 1 , 
+# HERE Riccardo LAGS THE OUTCOME_HAND: I WANT THE VARIABLE INFORMED BY PREVIOUS CHOICE AND FEEDBACK TO APPEAR IN THE CURRENT TRIAL
+sim_df$outcome_hand <- ifelse(lag(sim_df$feedback == 1 & sim_df$self == 0,1) | 
+                              lag(sim_df$feedback == 0 & sim_df$self == 1,1) , 
                               1, -1)
+
+# Riccardo's PROCEDURE GENERATED SOME NAs (no outcome hand for the first trial in each agent), HE REMOVES THOSE ROWS 
+sim_df <- sim_df[complete.cases(sim_df),]
+
 ```
 
 ### let's do some stan
 
 ```{r}
-#sim_df <- sim_df %>% 
-  #subset(agent_nr == 1)
+sim_df <- sim_df %>% 
+  filter(agent_nr == 1)
 
-data <- list(n = 1200, c = sim_df$self, outcome_hand = sim_df$outcome_hand)
+data <- list(n = 119, c = sim_df$self, outcome_hand = sim_df$outcome_hand)
 
 file <- file.path("LSWS.stan")
 mod <- cmdstan_model(file, 
@@ -148,6 +206,7 @@ ggplot(draws_df) +
   xlab("Follow Bias") +
   ylab("Posterior Density") +
   theme_classic()
+
 ```
 
 ```{r}
@@ -163,6 +222,60 @@ ggplot(draws_df) +
   geom_density(aes(b_prior), fill = "red", alpha = 0.3) +
   geom_vline(xintercept = 0.6, linetype = "dashed", color = "black", linewidth = 1.5) +
   xlab("Bias") +
+  ylab("Posterior Density") +
+  theme_classic()
+```
+# Memory agent
+```{r}
+data <- list(n = 120, h = d1$Self, other = d1$Other)
+file <- file.path("memoryagent.stan")
+mod <- cmdstan_model(file, 
+                     cpp_options = list(stan_threads = TRUE),
+                     stanc_options = list("O1"))
+
+# The following command calls Stan with specific options.
+samples <- mod$sample(
+  data = data,
+  seed = 123,
+  chains = 2,
+  parallel_chains = 2,
+  threads_per_chain = 2,
+  iter_warmup = 1000,
+  iter_sampling = 2000,
+  refresh = 0,
+  max_treedepth = 20,
+  adapt_delta = 0.99,
+)
+
+```
+```{r}
+draws_df <- as_draws_df(samples$draws())
+
+
+ggplot(draws_df, aes(.iteration, bias, group = .chain, color = .chain)) +
+  geom_line() +
+  theme_classic()
+
+draws_df <- draws_df %>% 
+  mutate(b_prior = rnorm(nrow(draws_df), 0, .7),
+         beta_prior = rnorm(nrow(draws_df), 0, .7)
+)
+
+# Now let's plot the density for theta (prior and posterior)
+
+ggplot(draws_df) +
+  geom_density(aes(bias), fill = "blue", alpha = 0.3) +
+  geom_density(aes(b_prior), fill = "red", alpha = 0.3) +
+  geom_vline(xintercept = 0.8, linetype = "dashed", color = "black", linewidth = 1.5) +
+  xlab("Bias") +
+  ylab("Posterior Density") +
+  theme_classic()
+
+ggplot(draws_df) +
+  geom_density(aes(beta), fill = "blue", alpha = 0.3) +
+  geom_density(aes(beta_prior), fill = "red", alpha = 0.3) +
+  geom_vline(xintercept = 0.8, linetype = "dashed", color = "black", linewidth = 1.5) +
+  xlab("Beta") +
   ylab("Posterior Density") +
   theme_classic()
 ```
