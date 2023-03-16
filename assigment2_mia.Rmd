@@ -31,7 +31,8 @@ bias <- 0.6
 follow_bias <- 0.8
 rate <- 0.5
 noise <- 0.2
-beta <- 0.5
+beta <- 0.65
+confidencerate <- 0.05 
 ```
 
 
@@ -56,36 +57,73 @@ d1 <- tibble(trial = seq(ntrials), Other = randomChoice, rate, noise)
 
 
 ```{r}
-# memory agent
-memory <- array(NA, ntrials)
 
-for (trial in 1:ntrials){
-  if (trial == 1) {
-    memory[trial] = 0.5;
-  } 
-  if (trial < ntrials){
-      memory[trial + 1] = memory[trial] + ((d1$Other[trial] - memory[trial]) / trial);
-      if (memory[trial + 1] == 0){memory[trial + 1] = 0.01;}
-      if (memory[trial + 1] == 1){memory[trial + 1] = 0.99;}
-    }
-}
-
-d1$memory <- memory
-
-# Now we create the memory agent 
-MemoryAgent_f <- function(bias, beta, memory){
-    choice = rbinom(1, 1, inv_logit_scaled(bias + beta * memory))
+# Now we create the memory agent whose beta changes based on winning or losing
+MemoryAgent_f <- function(bias, beta, memory, confidence){
+    choice = rbinom(1, 1, inv_logit_scaled(bias + (beta + confidence) * memory))
   return(choice)
 }
 
-Self = array(NA, ntrials)
-Self[1] <- rbinom(1, 1, 0.5) # no prior info at first trial
 
-for (i in 2:ntrials) {
-  Self[i] <- MemoryAgent_f(bias = 0, beta = 0.8, d1$memory[i])
+```
+
+```{r}
+# memory agent simulation function
+df <- NULL
+sim_mem <- function(nagents, ntrials, rate, noise, bias, beta, confidencerate){
+
+  for (agent in 1:nagents){
+    self <- rep(NA, ntrials) 
+    other <- rep(NA, ntrials) 
+    memory <- array(NA, ntrials)
+    confidence <- rep(NA, ntrials)
+    
+    self[1] <- rbinom(1, 1, 0.5)
+    other[1] <- rbinom(1, 1, 0.5)
+    confidence[1] <- 0
+    
+    # making other's choices
+    for (t in 1:ntrials) { 
+          other[t] <- RandomAgentNoise_f(rate, noise)
+        }
+    
+    # making memory
+    for (t in 1:ntrials){
+      if (t == 1) {
+        memory[t] = 0.5
+      } 
+      if (t < ntrials){
+          memory[t + 1] = memory[t] + ((other[t] - memory[t]) / t)
+          if (memory[t + 1] == 0){memory[t + 1] = 0.01}
+          if (memory[t + 1] == 1){memory[t + 1] = 0.99}
+      }
+    }
+    
+    # making self
+    for (t in 2:ntrials){ # first we update confidence based on previous trial
+      if (other[t-1] == self[t-1]){
+        confidence[t] = confidence[t-1] + confidencerate
+      }
+      else {
+        confidence[t] = confidence[t-1] - confidencerate
+      }
+      
+      self[t] <- MemoryAgent_f(bias, beta, memory[t], confidence[t])
+    }
+    
+    temp <- tibble(agent, trial = seq(ntrials), bias, beta, self, other, memory, 
+                   confidence = round(confidence, 2))
+
+    if (exists("df")) { df <- rbind(df, temp)} else{df <- temp} 
+    
+  }
+  return (df)
 }
 
-d1$Self = Self
+d1 <- sim_mem(nagents, ntrials, rate, noise, bias, beta, confidencerate)
+
+d1 <- d1 %>% 
+  mutate(beta_conf_combined = beta + confidence)
 ```
 
 
@@ -258,7 +296,7 @@ ggplot(draws_df, aes(.iteration, bias, group = .chain, color = .chain)) +
 
 draws_df <- draws_df %>% 
   mutate(b_prior = rnorm(nrow(draws_df), 0, .7),
-         beta_prior = rnorm(nrow(draws_df), 0, .7)
+         beta_prior = rnorm(nrow(draws_df), 0, 1)
 )
 
 # Now let's plot the density for theta (prior and posterior)
@@ -279,4 +317,3 @@ ggplot(draws_df) +
   ylab("Posterior Density") +
   theme_classic()
 ```
-

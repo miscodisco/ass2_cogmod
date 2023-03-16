@@ -9,6 +9,7 @@ data {
 parameters {
   real bias; // how likely is the agent to pick right when the previous rate has no information (50-50)?
   real beta; // how strongly is previous rate impacting the decision?
+  real confidencerate;
 }
 
 transformed parameters{
@@ -24,16 +25,30 @@ transformed parameters{
       if (memory[trial + 1] == 1){memory[trial + 1] = 0.99;}
     }
   }
+  
+  vector[n] confidence;
+  for (trial in 1:n){
+    if (trial == 1) {
+        confidence[trial] = 0;} 
+    if (trial < n){
+      if (other[t] == h[t]){
+        confidence[t+1] = confidence[t] + confidencerate;
+       }
+        else {
+        confidence[t+1] = confidence[t] - confidencerate;
+      }
+    }
+  }
 }
 
 // The model to be estimated. 
 model {
   // Priors
   target += normal_lpdf(bias | 0, .7);
-  target += normal_lpdf(beta | 0, .7);
+  target += normal_lpdf(beta | 0, 1);
   
   // Model, looping to keep track of memory
   for (trial in 1:n) {
-    target += bernoulli_logit_lpmf(h[trial] | bias + beta * logit(memory[trial]));
+    target += bernoulli_logit_lpmf(h[trial] | bias + (beta + confidence[t]) * logit(memory[trial]));
   }
 }
