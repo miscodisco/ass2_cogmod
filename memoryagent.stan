@@ -31,11 +31,11 @@ transformed parameters{
     if (trial == 1) {
         confidence[trial] = 0;} 
     if (trial < n){
-      if (other[t] == h[t]){
-        confidence[t+1] = confidence[t] + confidencerate;
+      if (other[trial] == h[trial]){
+        confidence[trial+1] = confidence[trial] + confidencerate;
        }
         else {
-        confidence[t+1] = confidence[t] - confidencerate;
+        confidence[trial+1] = confidence[trial] - confidencerate;
       }
     }
   }
@@ -49,6 +49,6 @@ model {
   
   // Model, looping to keep track of memory
   for (trial in 1:n) {
-    target += bernoulli_logit_lpmf(h[trial] | bias + (beta + confidence[t]) * logit(memory[trial]));
+    target += bernoulli_logit_lpmf(h[trial] | bias + (beta + confidence[trial]) * logit(memory[trial]));
   }
 }

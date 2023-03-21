@@ -126,6 +126,31 @@ d1 <- d1 %>%
   mutate(beta_conf_combined = beta + confidence)
 ```
 
+```{r}
+d1 <- d1 %>% 
+  filter(agent == 1)
+
+data <- list(n = 120, h = d1$self, other = d1$other)
+
+file <- file.path("memoryagent.stan")
+mod <- cmdstan_model(file, 
+                     cpp_options = list(stan_threads = TRUE),
+                     stanc_options = list("O1"))
+
+# The following command calls Stan with specific options.
+samples <- mod$sample(
+  data = data,
+  seed = 123,
+  chains = 2,
+  parallel_chains = 2,
+  threads_per_chain = 2,
+  iter_warmup = 1000,
+  iter_sampling = 2000,
+  refresh = 0,
+  max_treedepth = 20,
+  adapt_delta = 0.99,
+)
+```
 
 ```{r}
 # LSWS agent function
@@ -216,6 +241,7 @@ samples <- mod$sample(
   adapt_delta = 0.99,
 )
 ```
+
 ```{r}
 draws_df <- as_draws_df(samples$draws())
 
@@ -223,24 +249,26 @@ draws_df <- as_draws_df(samples$draws())
 
 ```{r}
 # Checking the model's chains
-ggplot(draws_df, aes(.iteration, follow_bias, group = .chain, color = .chain)) +
+ggplot(draws_df, aes(.iteration, bias, group = .chain, color = .chain)) +
   geom_line() +
   theme_classic()
 
 # Plotting the estimates against the prior distribution
 # the dashed line is the true rate
 
-# add a prior for theta (ugly, but we'll do better soon)
+# add a prior
 draws_df <- draws_df %>% 
-  mutate(fb_prior = rnorm(nrow(draws_df), 0, 1)
+  mutate(bi_prior = rnorm(nrow(draws_df), 0, .7),
+         b_prior = rnorm(nrow(draws_df), 0, 1),
+         c_prior = rnorm(nrow(draws_df), 0, .5)
 )
 
 # Now let's plot the density for theta (prior and posterior)
 
 ggplot(draws_df) +
-  geom_density(aes(follow_bias), fill = "blue", alpha = 0.3) +
-  geom_density(aes(fb_prior), fill = "red", alpha = 0.3) +
-  geom_vline(xintercept = 0.8, linetype = "dashed", color = "black", linewidth = 1.5) +
+  geom_density(aes(beta), fill = "blue", alpha = 0.3) +
+  geom_density(aes(b_prior), fill = "red", alpha = 0.3) +
+  geom_vline(xintercept = 0.65, linetype = "dashed", color = "black", linewidth = 1.5) +
   xlab("Follow Bias") +
   ylab("Posterior Density") +
   theme_classic()
