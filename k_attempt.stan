@@ -43,21 +43,13 @@ generated quantities{
   int <lower=0, upper=n> prior_preds;
   int <lower=0, upper=n> posterior_preds;
   
-  array[n] int <lower=0, upper=n> prior_choice;
-  array[n] int <lower=0, upper=n> posterior_choice;
+  bias_prior = normal_rng(0,1);
+  bias_posterior = bias;
   
-  bias_prior = inv_logit(normal_rng(0,1));
-  bias_posterior = inv_logit(bias);
+  follow_bias_prior = normal_rng(0,1);
+  follow_bias_posterior = follow_bias;
   
-  follow_bias_prior = inv_logit(normal_rng(0,1));
-  follow_bias_posterior = inv_logit(follow_bias);
-  
-  for (i in 1:n){
-    prior_choice[i] = binomial_rng(1, inv_logit(bias_prior + follow_bias_prior * outcome_hand[i]));
-    posterior_choice[i] = binomial_rng(1, inv_logit(bias_posterior + follow_bias_posterior * outcome_hand[i]));
-  }
-  
-  prior_preds = sum(prior_choice);
-  posterior_preds = sum(posterior_choice);
+  prior_preds = binomial_rng(n, inv_logit(bias_prior + follow_bias_prior * outcome_hand));
+  posterior_preds = binomial_rng(n, inv_logit(bias_posterior + follow_bias_posterior * outcome_hand));
   
 }
