@@ -249,7 +249,7 @@ draws_df <- as_draws_df(samples$draws())
 
 ```{r}
 # Checking the model's chains
-ggplot(draws_df, aes(.iteration, bias, group = .chain, color = .chain)) +
+ggplot(draws_df, aes(.iteration, beta, group = .chain, color = .chain)) +
   geom_line() +
   theme_classic()
 
@@ -266,9 +266,9 @@ draws_df <- draws_df %>%
 # Now let's plot the density for theta (prior and posterior)
 
 ggplot(draws_df) +
-  geom_density(aes(beta), fill = "blue", alpha = 0.3) +
-  geom_density(aes(b_prior), fill = "red", alpha = 0.3) +
-  geom_vline(xintercept = 0.65, linetype = "dashed", color = "black", linewidth = 1.5) +
+  geom_density(aes(confidencerate), fill = "blue", alpha = 0.3) +
+  geom_density(aes(c_prior), fill = "red", alpha = 0.3) +
+  geom_vline(xintercept = 0.05, linetype = "dashed", color = "black", linewidth = 1.5) +
   xlab("Follow Bias") +
   ylab("Posterior Density") +
   theme_classic()
@@ -293,7 +293,9 @@ ggplot(draws_df) +
 ```
 # Memory agent
 ```{r}
-data <- list(n = 120, h = d1$Self, other = d1$Other)
+
+data <- list(n = 120, h = d1$self, other = d1$other, prior_mean_bias = 0,prior_sd_bias = 1,  prior_mean_beta = 0, 
+             prior_sd_beta = 1,prior_mean_conf = 0, prior_sd_conf = 0.3 )
 file <- file.path("memoryagent.stan")
 mod <- cmdstan_model(file, 
                      cpp_options = list(stan_threads = TRUE),
@@ -314,6 +316,7 @@ samples <- mod$sample(
 )
 
 ```
+
 ```{r}
 draws_df <- as_draws_df(samples$draws())
 
@@ -324,7 +327,8 @@ ggplot(draws_df, aes(.iteration, bias, group = .chain, color = .chain)) +
 
 draws_df <- draws_df %>% 
   mutate(b_prior = rnorm(nrow(draws_df), 0, .7),
-         beta_prior = rnorm(nrow(draws_df), 0, 1)
+         beta_prior = rnorm(nrow(draws_df), 0, 1),
+         c_prior = rnorm(nrow(draws_df), 0, .3)
 )
 
 # Now let's plot the density for theta (prior and posterior)
@@ -332,7 +336,7 @@ draws_df <- draws_df %>%
 ggplot(draws_df) +
   geom_density(aes(bias), fill = "blue", alpha = 0.3) +
   geom_density(aes(b_prior), fill = "red", alpha = 0.3) +
-  geom_vline(xintercept = 0.8, linetype = "dashed", color = "black", linewidth = 1.5) +
+  geom_vline(xintercept = 0.6, linetype = "dashed", color = "black", linewidth = 1.5) +
   xlab("Bias") +
   ylab("Posterior Density") +
   theme_classic()
@@ -340,8 +344,16 @@ ggplot(draws_df) +
 ggplot(draws_df) +
   geom_density(aes(beta), fill = "blue", alpha = 0.3) +
   geom_density(aes(beta_prior), fill = "red", alpha = 0.3) +
-  geom_vline(xintercept = 0.8, linetype = "dashed", color = "black", linewidth = 1.5) +
+  geom_vline(xintercept = 0.65, linetype = "dashed", color = "black", linewidth = 1.5) +
   xlab("Beta") +
+  ylab("Posterior Density") +
+  theme_classic()
+
+ggplot(draws_df) +
+  geom_density(aes(confidencerate), fill = "blue", alpha = 0.3) +
+  geom_density(aes(c_prior), fill = "red", alpha = 0.3) +
+  geom_vline(xintercept = 0.05, linetype = "dashed", color = "black", linewidth = 1.5) +
+  xlab("Confidence rate") +
   ylab("Posterior Density") +
   theme_classic()
 ```
