@@ -21,7 +21,6 @@ pacman::p_load(tidyverse,
 
 ## Matching pennies with LSWS 
 
-
 ### Simulating data
 ```{r}
 # set up
@@ -199,51 +198,40 @@ priors
 ```
 
 ```{r}
-file <- file.path("LSWS_prior.stan")
-mod <- cmdstan_model(file, 
-                     cpp_options = list(stan_threads = TRUE),
-                     stanc_options = list("O1"))
+randomChoice <- array(NA, ntrials)
+
+for (t in seq(ntrials)) { 
+      randomChoice[t] <- RandomAgentNoise_f(rate, noise)
+    }
+d1 <- tibble(trial = seq(ntrials), Other = randomChoice, rate, noise)
 
 ```
 
-
 ```{r}
-data <- list(n = 1199, c = sim_df$self, outcome_hand = sim_df$outcome_hand,  prior_mean_bias = priors$prior_mean_bias, prior_sd_bias = priors$prior_sd_bias, prior_mean_follow_bias = priors$prior_mean_follow_bias, prior_sd_follow_bias = priors$prior_sd_follow_bias) # why is one row missing?
-
 file <- file.path("LSWS_prior.stan")
+
 mod <- cmdstan_model(file, 
                      cpp_options = list(stan_threads = TRUE),
                      stanc_options = list("O1"))
-
-# The following command calls Stan with specific options.
-samples <- mod$sample(
-data = data,
-seed = 1000,
-chains = 1,
-parallel_chains = 1,
-threads_per_chain = 1,
-iter_warmup = 1000,
-iter_sampling = 2000,
-refresh = 0,
-max_treedepth = 20,
-adapt_delta = 0.99,
-)
 
 pacman::p_load(future, purrr, furrr)
 plan(multisession, workers = 4)
 
+sim_df <- sim_df %>% 
+  select("self","outcome_hand")
+
 sim_d_and_fit <- function(prior_mean_bias, prior_sd_bias, prior_mean_follow_bias, prior_sd_follow_bias) {
 
     data <- list(n = 1199, c = sim_df$self, outcome_hand = sim_df$outcome_hand, prior_mean_bias = prior_mean_bias, prior_sd_bias = prior_sd_bias, prior_mean_follow_bias = prior_mean_follow_bias, prior_sd_follow_bias = prior_sd_follow_bias)
-    
+  
     samples <- mod$sample(
       data = data,
       seed = 1000,
       chains = 1,
       parallel_chains = 1,
       threads_per_chain = 1,
-      iter_warmup = 1000,
-      iter_sampling = 2000,
+      iter_warmup = 100,
+      iter_sampling = 1,
       refresh = 0,
       max_treedepth = 20,
       adapt_delta = 0.99,
@@ -263,7 +251,7 @@ sim_d_and_fit <- function(prior_mean_bias, prior_sd_bias, prior_mean_follow_bias
   
 }
 
-recovery_df <- future_pmap_dfr(priors, sim_d_and_fit, .options = furrr_options(seed = TRUE))
+recovery_df <- future_pmap_dfr(priors[1:2,], sim_d_and_fit, .options = furrr_options(seed = TRUE))
 
 ```
 
@@ -290,6 +278,166 @@ ggplot(recovery_df, aes(prior_mean_follow_bias, follow_bias_posterior)) +
   theme_classic()
 
 ```
+
+
+# Riccardos code
+```{r}
+# Simulating random agent
+
+pacman::p_load(tidyverse,
+        here,
+        posterior,
+        cmdstanr,
+        brms, tidybayes)
+
+trials <- 120
+
+RandomAgentNoise_f <- function(rate, noise) {
+
+  choice <- rbinom(1, 1, rate) # generating noiseless choices
+  
+  if (rbinom(1, 1, noise) == 1) {
+    choice = rbinom(1, 1, 0.5) # introducing noise
+  }
+  
+  return(choice)
+}
+
+d <- NULL
+for (noise in seq(0, 0.5, 0.1)) { # looping through noise levels
+
+  for (rate in seq(0, 1, 0.1)) { # looping through rate levels
+    randomChoice <- rep(NA, trials)
+    
+    for (t in seq(trials)) { # looping through trials (to make it homologous to more reactive models)
+      randomChoice[t] <- RandomAgentNoise_f(rate, noise)
+    }
+    temp <- tibble(trial = seq(trials), choice = randomChoice, rate, noise)
+    temp$cumulativerate <- cumsum(temp$choice) / seq_along(temp$choice)
+
+    if (exists("d")) {
+      d <- rbind(d, temp)
+    } else{
+      d <- temp
+    }
+  }
+}
+
+p1 <- ggplot(d, aes(trial, cumulativerate, group = rate, color = rate)) + 
+  geom_line() + 
+  geom_hline(yintercept = 0.5, linetype = "dashed") + 
+  ylim(0,1) + 
+  facet_wrap(.~noise) + 
+  theme_classic()
+p1
+
+```
+
+```{r}
+## Now we adding different priors for theta
+prior_mean <- seq(-3, 3, .5)
+prior_sd <- seq(0.1, 1, 0.1)
+priors <-  expand.grid(prior_mean, prior_sd)
+priors <- tibble(prior_mean = priors$Var1, prior_sd = priors$Var2)
+
+stan_model <- "
+  // The input (data) for the model
+data {
+  int<lower=1> n;
+  array[n] int h;
+  real prior_mean;
+  real<lower=0> prior_sd;
+}
+
+// The parameters accepted by the model. 
+parameters {
+  real theta;
+}
+
+// The model to be estimated. 
+model {
+  // Prior
+  target += normal_lpdf(theta | prior_mean, prior_sd);
+  
+  // Model
+  target += bernoulli_logit_lpmf(h | theta);
+}
+
+generated quantities{
+  real<lower=0, upper=1> theta_prior;
+  real<lower=0, upper=1> theta_posterior;
+  int<lower=0, upper=n> prior_preds;
+  int<lower=0, upper=n> posterior_preds;
+  
+  theta_prior = inv_logit(normal_rng(0,1));
+  theta_posterior = inv_logit(theta);
+  prior_preds = binomial_rng(n, theta_prior);
+  posterior_preds = binomial_rng(n, inv_logit(theta));
+  
+}
+"
+
+write_stan_file(
+  stan_model,
+  dir = "stan/",
+  basename = "W4_PriorBernoulli.stan")
+
+file <- file.path("stan/W4_PriorBernoulli.stan")
+mod <- cmdstan_model(file, 
+                     cpp_options = list(stan_threads = TRUE),
+                     stanc_options = list("O1"))
+
+dd <- d %>% subset(noise == 0.1 & rate == 0.8)
+
+pacman::p_load(future, purrr, furrr)
+plan(multisession, workers = 4)
+
+sim_d_and_fit <- function(prior_mean, prior_sd) {
+  
+    data <- list(
+        n = nrow(dd),
+        h = dd$choice,
+        prior_mean = prior_mean,
+        prior_sd = prior_sd
+      )
+    
+    samples <- mod$sample(
+      data = data,
+      seed = 1000,
+      chains = 1,
+      parallel_chains = 1,
+      threads_per_chain = 1,
+      iter_warmup = 1000,
+      iter_sampling = 2000,
+      refresh = 0,
+      max_treedepth = 20,
+      adapt_delta = 0.99,
+    )
+    
+    draws_df <- as_draws_df(samples$draws()) 
+      temp <- tibble(theta_prior = draws_df$theta_prior, 
+                     theta_posterior = draws_df$theta_posterior, 
+                     prior_preds = draws_df$prior_preds, 
+                     posterior_preds = draws_df$posterior_preds, 
+                     prior_mean = prior_mean,
+                     prior_sd = prior_sd)
+    
+    return(temp)
+  
+}
+
+
+
+
+recovery_df <- future_pmap_dfr(priors, sim_d_and_fit, .options = furrr_options(seed = TRUE))
+
+```
+
+
+
+
+
+
 
 
 
