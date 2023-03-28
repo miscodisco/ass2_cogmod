@@ -71,8 +71,8 @@ generated quantities {
   real <lower=0, upper=1> conf_prior;
   real <lower=0, upper=1> conf_posterior;
   
-  //array[n] int prior_preds;
-  //array[n] int posterior_preds;
+  array[n] int prior_preds;
+  array[n] int posterior_preds;
   
   array[n] int prior_preds_03;
   array[n] int posterior_preds_03;
@@ -90,8 +90,11 @@ generated quantities {
   conf_prior = inv_logit(normal_rng(0,1));
   conf_posterior = inv_logit(confidencerate);
   
-  //prior_preds = binomial_rng(n, inv_logit(bias_prior + (beta_prior+confidence) * memory));
-  //posterior_preds = binomial_rng(n, inv_logit(bias_posterior + (beta_posterior+confidence) * memory));
+  for (t in 1:n){
+    prior_preds[t] = binomial_rng(n, inv_logit(bias_prior + (beta_prior + confidence[t]) * memory[t]));}
+  
+  for (t in 1:n){
+    posterior_preds[t] = binomial_rng(n, inv_logit(bias_posterior + (beta_posterior + confidence[t]) * memory[t]));}
   
   prior_preds_03 = binomial_rng(n, inv_logit(bias_prior + (beta_prior+confidence) * 0.3));
   posterior_preds_03 = binomial_rng(n, inv_logit(bias_posterior + (beta_posterior+confidence) * 0.3));
