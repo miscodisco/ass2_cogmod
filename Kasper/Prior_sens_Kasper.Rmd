@@ -105,7 +105,7 @@ sim_df <- sim_df[complete.cases(sim_df),]
 
 data <- list(n = 1199, c = sim_df$self, outcome_hand = sim_df$outcome_hand) # why is one row missing?
 
-file <- file.path("LSWS.stan")
+file <- file.path("K_attempt.stan")
 mod <- cmdstan_model(file, 
                      cpp_options = list(stan_threads = TRUE),
                      stanc_options = list("O1"))
@@ -186,10 +186,10 @@ ggplot(draws_df) +
 # Prior sensitivity analysis
 
 ```{r}
-prior_mean_bias <- seq(-1, 1, .25)
-prior_sd_bias <- seq(0.1, 1.1, 0.2)
-prior_mean_follow_bias <- seq(-3, 3, 0.5)
-prior_sd_follow_bias <- seq(0.1, 1.1, 0.2)
+prior_mean_bias <- seq(0, 1, 0.1)
+prior_sd_bias <- seq(0.1, 1, 0.1)
+prior_mean_follow_bias <- seq(-2, 2, 0.25)
+prior_sd_follow_bias <- seq(0.1, 1, 0.1)
 priors <-  expand.grid(prior_mean_bias, prior_sd_bias, prior_mean_follow_bias, prior_sd_follow_bias)
 priors <- tibble(prior_mean_bias = priors$Var1, prior_sd_bias = priors$Var2, prior_mean_follow_bias = priors$Var3, prior_sd_follow_bias = priors$Var4)
 
@@ -610,12 +610,12 @@ ggplot(draws_df) +
 ```
 ```{r}
 #Priors
-prior_mean_bias <- seq(-1, 1, 1)
-prior_sd_bias <- seq(0.1, 1.1, .5)
-prior_mean_beta <- seq(-1, 1, 1)
-prior_sd_beta <- seq(0.1, 1.1, .5)
-prior_mean_conf <- seq(-1, 1, 1)
-prior_sd_conf <- seq(0.1, 1.1, .5)
+prior_mean_bias <- seq(0.1, 1, 0.15)
+prior_sd_bias <- seq(0.1, 1, .3)
+prior_mean_beta <- seq(0.1, 1, 0.15)
+prior_sd_beta <- seq(0.1, 1.1, .3)
+prior_mean_conf <- seq(-2, 2, 0.5)
+prior_sd_conf <- seq(0.1, 1, .3)
 priors <-  expand.grid(prior_mean_bias, prior_sd_bias, prior_mean_beta, prior_sd_beta, prior_mean_conf, prior_sd_conf)
 priors <- tibble(prior_mean_bias = priors$Var1, prior_sd_bias = priors$Var2, prior_mean_beta = priors$Var3, prior_sd_beta = priors$Var4, prior_mean_conf = priors$Var5, prior_sd_conf = priors$Var6)
 
@@ -671,7 +671,7 @@ sim_d_and_fit <- function(prior_mean_bias, prior_sd_bias, prior_mean_beta, prior
   
 }
 
-recovery_df1 <- future_pmap_dfr(priors[1:50,], sim_d_and_fit, .options = furrr_options(seed = TRUE))
+recovery_df1 <- future_pmap_dfr(priors, sim_d_and_fit, .options = furrr_options(seed = TRUE))
 
 ```
 

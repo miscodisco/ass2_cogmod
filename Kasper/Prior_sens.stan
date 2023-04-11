@@ -18,7 +18,7 @@ parameters {
 
 // The model
 model {
-  // priors
+  // priors2
   target += normal_lpdf(bias | prior_mean_bias, prior_sd_bias);
   target += normal_lpdf(follow_bias | prior_mean_follow_bias, prior_sd_follow_bias);
   
@@ -46,6 +46,7 @@ generated quantities{
   follow_bias_prior = normal_rng(0,1);
   follow_bias_posterior = follow_bias;
   
+  #Generating the prior and posterior distributions of choice with the different combinations of priors
   for (i in 1:n){
     prior_choice[i] = binomial_rng(1, inv_logit(bias_prior + follow_bias_prior * outcome_hand[i]));
     posterior_choice[i] = binomial_rng(1, inv_logit(bias_posterior + follow_bias_posterior * outcome_hand[i]));
